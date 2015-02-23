@@ -2245,36 +2245,6 @@ uint32 ObjectMgr::GetPlayerAccountIdByPlayerName(std::string const& name)
     return 0;
 }
 
-void ObjectMgr::LoadItemLocales()
-{
-    uint32 oldMSTime = getMSTime();
-
-    _itemLocaleStore.clear();                                 // need for reload case
-
-    QueryResult result = WorldDatabase.Query("SELECT entry, name_loc1, description_loc1, name_loc2, description_loc2, name_loc3, description_loc3, name_loc4, description_loc4, name_loc5, description_loc5, name_loc6, description_loc6, name_loc7, description_loc7, name_loc8, description_loc8 FROM locales_item");
-
-    if (!result)
-        return;
-
-    do
-    {
-        Field* fields = result->Fetch();
-
-        uint32 entry = fields[0].GetUInt32();
-
-        ItemLocale& data = _itemLocaleStore[entry];
-
-        for (uint8 i = TOTAL_LOCALES - 1; i > 0; --i)
-        {
-            LocaleConstant locale = (LocaleConstant) i;
-            AddLocaleString(fields[1 + 2 * (i - 1)].GetString(), locale, data.Name);
-            AddLocaleString(fields[1 + 2 * (i - 1) + 1].GetString(), locale, data.Description);
-        }
-    } while (result->NextRow());
-
-    TC_LOG_INFO("server.loading", ">> Loaded %u Item locale strings in %u ms", uint32(_itemLocaleStore.size()), GetMSTimeDiffToNow(oldMSTime));
-}
-
 uint32 FillMaxDurability(uint32 itemClass, uint32 itemSubClass, uint32 inventoryType, uint32 quality, uint32 itemLevel)
 {
     if (itemClass != ITEM_CLASS_ARMOR && itemClass != ITEM_CLASS_WEAPON)
@@ -2404,14 +2374,13 @@ void ObjectMgr::LoadItemTemplates()
     uint32 oldMSTime = getMSTime();
     uint32 sparseCount = 0;
 
-    for (uint32 itemId = 0; itemId < sItemSparseStore.GetNumRows(); ++itemId)
+    for (ItemSparseEntry const* sparse : sItemSparseStore)
     {
-        ItemSparseEntry const* sparse = sItemSparseStore.LookupEntry(itemId);
-        ItemEntry const* db2Data = sItemStore.LookupEntry(itemId);
-        if (!sparse || !db2Data)
+        ItemEntry const* db2Data = sItemStore.LookupEntry(sparse->ID);
+        if (!db2Data)
             continue;
 
-        ItemTemplate& itemTemplate = _itemTemplateStore[itemId];
+        ItemTemplate& itemTemplate = _itemTemplateStore[sparse->ID];
 
         itemTemplate.BasicData = db2Data;
         itemTemplate.ExtendedData = sparse;
@@ -2428,24 +2397,13 @@ void ObjectMgr::LoadItemTemplates()
     }
 
     // Load item effects (spells)
-    for (uint32 effectId = 0; effectId < sItemEffectStore.GetNumRows(); ++effectId)
+    for (ItemEffectEntry const* effectEntry : sItemEffectStore)
     {
-        ItemEffectEntry const* effectEntry = sItemEffectStore.LookupEntry(effectId);
-        if (!effectEntry)
-            continue;
-
         auto itemItr = _itemTemplateStore.find(effectEntry->ItemID);
         if (itemItr == _itemTemplateStore.end())
             continue;
 
-        ItemEffect effect;
-        effect.SpellID = effectEntry->SpellID;
-        effect.Trigger = effectEntry->Trigger;
-        effect.Charges = effectEntry->Charges;
-        effect.Cooldown = effectEntry->Cooldown;
-        effect.Category = effectEntry->Category;
-        effect.CategoryCooldown = effectEntry->CategoryCooldown;
-        itemItr->second.Effects.push_back(effect);
+        itemItr->second.Effects.push_back(effectEntry);
     }
 
     // Check if item templates for DBC referenced character start outfit are present
@@ -5474,34 +5432,32 @@ uint32 ObjectMgr::GetNearestTaxiNode(float x, float y, float z, uint32 mapid, ui
     float dist = 10000;
     uint32 id = 0;
 
-    for (uint32 i = 1; i < sTaxiNodesStore.GetNumRows(); ++i)
+    for (TaxiNodesEntry const* node : sTaxiNodesStore)
     {
-        TaxiNodesEntry const* node = sTaxiNodesStore.LookupEntry(i);
-
         if (!node || node->MapID != mapid || (!node->MountCreatureID[team == ALLIANCE ? 1 : 0] && node->MountCreatureID[0] != 32981)) // dk flight
             continue;
 
-        uint8  field   = (uint8)((i - 1) / 8);
-        uint32 submask = 1 << ((i-1) % 8);
+        uint8  field   = (uint8)((node->ID - 1) / 8);
+        uint32 submask = 1 << ((node->ID - 1) % 8);
 
         // skip not taxi network nodes
         if ((sTaxiNodesMask[field] & submask) == 0)
             continue;
 
-        float dist2 = (node->Pos.X - x)*(node->Pos.X - x)+(node->Pos.Y - y)*(node->Pos.Y - y)+(node->Pos.Z - z)*(node->Pos.Z - z);
+        float dist2 = (node->Pos.X - x)*(node->Pos.X - x) + (node->Pos.Y - y)*(node->Pos.Y - y) + (node->Pos.Z - z)*(node->Pos.Z - z);
         if (found)
         {
             if (dist2 < dist)
             {
                 dist = dist2;
-                id = i;
+                id = node->ID;
             }
         }
         else
         {
             found = true;
             dist = dist2;
-            id = i;
+            id = node->ID;
         }
     }
 
